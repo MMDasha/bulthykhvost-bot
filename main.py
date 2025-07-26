@@ -3,19 +3,20 @@ import asyncio
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
 from dotenv import load_dotenv
-from openai import OpenAI
+import openai
 from gtts import gTTS
 from uuid import uuid4
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-openai = OpenAI(api_key=OPENAI_API_KEY)
 user_data = {}
+
 
 @dp.message(CommandStart())
 async def start(message: types.Message):
