@@ -1,71 +1,81 @@
+import logging
 import os
-import asyncio
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart
-from dotenv import load_dotenv
 import openai
-from gtts import gTTS
-from uuid import uuid4
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import Message
+from aiogram.utils import executor
+from aiogram.dispatcher.filters import CommandStart
+from aiogram.dispatcher import FSMContext
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.dispatcher.filters.state import State, StatesGroup
 
-load_dotenv()
+# Настройка логов
+logging.basicConfig(level=logging.INFO)
 
+# Получение токенов
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai.api_key = OPENAI_API_KEY
+
+if not BOT_TOKEN:
+    raise ValueError("❌ Переменная окружения BOT_TOKEN не задана")
+if not OPENAI_API_KEY:
+    raise ValueError("❌ Переменная окружения OPENAI_API_KEY не задана")
 
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot, storage=MemoryStorage())
+openai.api_key = OPENAI_API_KEY
 
-user_data = {}
+# Машина состояний
+class StoryState(StatesGroup):
+    waiting_for_name = State()
+    waiting_for_theme = State()
 
-@dp.message(CommandStart())
-async def start_handler(message: types.Message):
+# Обработка /start
+@dp.message_handler(CommandStart())
+async def start(message: Message, state: FSMContext):
     await message.answer("Привет! Я Бультыхвост-сказочник 🐾\nКак зовут ребёнка, для которого сочинять сказки?")
-    user_data[message.from_user.id] = {"stage": "name"}
+    await state.set_state(StoryState.waiting_for_name.state)
 
-@dp.message()
-async def handle_message(message: types.Message):
-    user_id = message.from_user.id
-    if user_id not in user_data:
-        await message.answer("Пожалуйста, начни сначала с команды /start.")
-        return
+# Имя ребёнка
+@dp.message_handler(state=StoryState.waiting_for_name)
+async def get_name(message: Message, state: FSMContext):
+    await state.update_data(child_name=message.text)
+    await message.answer(f"Имя ребёнка — {message.text}? Отлично! Теперь напиши тему сказки 🌟")
+    await state.set_state(StoryState.waiting_for_theme.state)
 
-    stage = user_data[user_id].get("stage")
+# Тема сказки
+@dp.message_handler(state=StoryState.waiting_for_theme)
+async def get_theme(message: Message, state: FSMContext):
+    await state.update_data(theme=message.text)
+    await message.answer("Пишу сказку... 📖")
 
-    if stage == "name":
-        child_name = message.text.strip()
-        user_data[user_id]["child_name"] = child_name
-        user_data[user_id]["stage"] = "topic"
-        await message.answer(f"Имя ребёнка — {child_name}? Отлично! Теперь напиши тему сказки 🌟")
+    data = await state.get_data()
+    child_name = data["child_name"]
+    theme = data["theme"]
 
-    elif stage == "topic":
-        story_topic = message.text.strip()
-        child_name = user_data[user_id].get("child_name", "Малыш")
-        await message.answer("Пишу сказку... 📖")
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{
+                "role": "user",
+                "content": f"Сочини добрую сказку для ребёнка по имени {child_name} на тему: {theme}"
+            }],
+            max_tokens=600,
+            temperature=0.9,
+        )
+        story = response["choices"][0]["message"]["content"]
+        await message.answer(story)
+    except Exception as e:
+        await message.answer(f"Не удалось сочинить сказку 😢\nОшибка: {e}")
 
-        try:
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "Ты добрый сказочник, сочиняй сказки для детей."},
-                    {"role": "user", "content": f"Сочини сказку для ребёнка по имени {child_name} на тему {story_topic}."}
-                ]
-            )
-            story_text = response['choices'][0]['message']['content']
-            await message.answer(story_text)
-        except Exception as e:
-            print(f"OpenAI Error: {e}")
-            await message.answer("Не удалось сочинить сказку 😢 Попробуй ещё раз позже.")
+    await state.finish()
 
-        user_data[user_id]["stage"] = "done"
+# Обработка любого сообщения до /start
+@dp.message_handler()
+async def fallback(message: Message):
+    await message.answer("Пожалуйста, начни сначала с команды /start.")
 
-    else:
-        await message.answer("Если хочешь начать сначала, отправь /start")
+if __name__ == "__main__":
+    executor.start_polling(dp, skip_updates=True)
 
-
-async def main():
-    await dp.start_polling(bot)
-
-if __name__ == '__main__':
-    asyncio.run(main())
 
