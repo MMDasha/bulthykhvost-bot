@@ -7,6 +7,7 @@ import openai
 from gtts import gTTS
 from uuid import uuid4
 
+# Загружаем переменные из .env (или из Railway/Render)
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -14,9 +15,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
 user_data = {}
-
 
 @dp.message(CommandStart())
 async def start(message: types.Message):
@@ -35,32 +34,26 @@ async def handle_text(message: types.Message):
         child_name = user_data[user_id]['child_name']
         await message.answer("Пишу сказку... 📖")
 
-        prompt = f"Сочини сказку с героем по имени Бултыхвост. Сказка должна быть волшебной, доброй, с поучительным концом. Имя ребёнка — {child_name}. Тема: {text}."
-        story_response = openai.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.95,
-            max_tokens=800
+        prompt = (
+            f"Сочини добрую сказку с волшебным героем Бултыхвостом. "
+            f"Имя ребёнка — {child_name}. Тема сказки: {text}. "
+            f"Сказка должна быть поучительной, весёлой и интересной для детей 4–6 лет."
         )
-        story = story_response.choices[0].message.content.strip()
-        await message.answer(story)
 
-        await message.answer("Создаю иллюстрацию... 🖼")
-        image_prompt = f"Иллюстрация к детской сказке с героем Бултыхвост, на тему: {text}. Волшебный стиль, яркие цвета."
-        image_response = openai.images.generate(
-            model="dall-e-3",
-            prompt=image_prompt,
-            size="1024x1024",
-            n=1
-        )
-        await message.answer_photo(image_response.data[0].url)
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.9,
+                max_tokens=600,
+                request_timeout=20  # ⏱ 20 секунд максимум
+            )
+            story = response.choices[0].message.content.strip()
+            await message.answer(story)
 
-        await message.answer("Готовлю озвучку... 🎤")
-        tts = gTTS(story, lang="ru")
-        filename = f"/tmp/{uuid4().hex}.mp3"
-        tts.save(filename)
-        await message.answer_voice(types.FSInputFile(filename))
-        os.remove(filename)
+        except Exception as e:
+            await message.answer("Не удалось сочинить сказку 😢 Попробуй ещё раз позже.")
+            print(f"[OpenAI ERROR]: {e}")
 
 async def main():
     await dp.start_polling(bot)
