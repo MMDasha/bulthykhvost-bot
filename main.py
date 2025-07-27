@@ -7,7 +7,6 @@ import openai
 from gtts import gTTS
 from uuid import uuid4
 
-# Загружаем переменные из .env (или из Railway/Render)
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -46,7 +45,7 @@ async def handle_text(message: types.Message):
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.9,
                 max_tokens=600,
-                request_timeout=20  # ⏱ 20 секунд максимум
+                request_timeout=20
             )
             story = response.choices[0].message.content.strip()
             await message.answer(story)
