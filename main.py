@@ -1,74 +1,52 @@
 import os
+import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ParseMode
 from aiogram.utils import executor
 from dotenv import load_dotenv
 import openai
 
-# Загрузка .env
+# --- Загружаем переменные окружения ---
 load_dotenv()
 
-# Получение токенов из переменных окружения
-TELEGRAM_API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
+TELEGRAM_API_TOKEN = os.getenv("BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Проверка наличия токенов
-if not TELEGRAM_API_TOKEN:
-    raise ValueError("TELEGRAM_API_TOKEN is not set")
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY is not set")
+if TELEGRAM_API_KEY is None:
+    raise ValueError("BOT_TOKEN is not set in environment")
+if OPENAI_API_KEY is None:
+    raise ValueError("OPENAI_API_KEY is not set in environment")
 
-# Инициализация
-bot = Bot(token=TELEGRAM_API_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher(bot)
+# --- Настройка логгера ---
+logging.basicConfig(level=logging.INFO)
+
+# --- Настройка OpenAI ---
 openai.api_key = OPENAI_API_KEY
 
-# Простая FSM на словаре
-user_state = {}
+# --- Настройка бота ---
+bot = Bot(token=TELEGRAM_API_TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher(bot)
+
+# --- Состояние для сказки ---
+from aiogram.dispatcher import FSMContext
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.dispatcher.filters.state import State, StatesGroup
+
+dp.storage = MemoryStorage()
+
+
+class StoryStates(StatesGroup):
+    waiting_for_name = State()
+    waiting_for_theme = State()
+
 
 @dp.message_handler(commands=["start"])
 async def cmd_start(message: types.Message):
-    user_state[message.from_user.id] = {"step": "get_name"}
-    await message.answer("Привет! Я Бультыхвост-сказочник 🐾\nКак зовут ребёнка, для которого сочинять сказки?")
+    await message.reply("Привет! Я Бультыхвост-сказочник 🐾\nКак зовут ребёнка, для которого сочинять сказки?")
+    await StoryStates.waiting_for_name.set()
 
-@dp.message_handler()
-async def handle_message(message: types.Message):
-    user_id = message.from_user.id
-    if user_id not in user_state:
-        await message.answer("Пожалуйста, начни сначала с команды /start.")
-        return
 
-    state = user_state[user_id]
+@dp.message_handler(state=StoryStates.waiting_for_name)
+async def process_name(message: types.Message, state: FSMContext):
+    await state.update_data(child_name=mess
 
-    if state["step"] == "get_name":
-        child_name = message.text.strip()
-        state["name"] = child_name
-        state["step"] = "get_topic"
-        await message.answer(f"Имя ребёнка — {child_name}? Отлично! Теперь напиши тему сказки ✨")
-    elif state["step"] == "get_topic":
-        topic = message.text.strip()
-        name = state.get("name", "Ребёнок")
-        await message.answer("Пишу сказку... 📖")
-
-        try:
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "Ты добрый сказочник, рассказывающий интересные, добрые, волшебные сказки."},
-                    {"role": "user", "content": f"Сочини короткую сказку для ребёнка по имени {name} на тему: {topic}."}
-                ],
-                max_tokens=500,
-                temperature=0.9
-            )
-            story = response.choices[0].message["content"]
-            await message.answer(story)
-        except Exception as e:
-            await message.answer(f"Не удалось сочинить сказку 😢 Попробуй ещё раз позже.")
-            print(f"OpenAI Error: {e}")
-
-        user_state.pop(user_id)
-    else:
-        await message.answer("Что-то пошло не так. Попробуй /start заново.")
-
-if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
