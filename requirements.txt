@@ -1,6 +1,8 @@
 aiogram==2.25.1
 openai
 python-dotenv
+gtts
+pydub
 
 
 
