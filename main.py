@@ -1,127 +1,76 @@
 import os
 import logging
-from aiogram import Bot, Dispatcher, executor, types
+import asyncio
 from dotenv import load_dotenv
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
 import openai
 from gtts import gTTS
-from aiogram.types import InputFile
+from io import BytesIO
 
-# ==============================
-# Настройка логирования
-# ==============================
-logging.basicConfig(level=logging.INFO)
-
-# ==============================
 # Загружаем переменные окружения
-# ==============================
 load_dotenv()
-
 TELEGRAM_API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Проверяем наличие токенов
-if not TELEGRAM_API_TOKEN or not OPENAI_API_KEY:
-    raise EnvironmentError(
-        "❌ TELEGRAM_API_TOKEN или OPENAI_API_KEY не установлены. "
-        "Проверь файл .env или Render Environment Variables."
-)
-
-# ==============================
 # Настройка OpenAI
-# ==============================
 openai.api_key = OPENAI_API_KEY
 
-# ==============================
-# Создаём Telegram-бота
-# ==============================
+# Настройка логов
+logging.basicConfig(level=logging.INFO)
+
+# Создаём объекты бота и диспетчера
 bot = Bot(token=TELEGRAM_API_TOKEN)
 dp = Dispatcher(bot)
 
-# ==============================
-# Хранилище данных пользователя
-# ==============================
-user_data = {}
+# Храним имя ребёнка в памяти
+user_name = {}
 
-# ==============================
-# Генерация сказки через OpenAI
-# ==============================
-async def generate_story(child_name: str, topic: str) -> str:
-    try:
-        response = openai.Completion.create(
-            model="text-davinci-003",
-            prompt=f"Сочини добрую и весёлую детскую сказку для ребёнка по имени {child_name} на тему {topic}.",
-            max_tokens=500,
-            temperature=0.8,
-            top_p=1,
-        )
-        return response.choices[0].text.strip()
-    except Exception as e:
-        logging.error(f"Ошибка OpenAI: {e}")
-        return None
-
-# ==============================
-# Генерация озвучки
-# ==============================
-def generate_audio(text: str, filename="story.mp3") -> str:
-    try:
-        tts = gTTS(text=text, lang="ru")
-        tts.save(filename)
-        return filename
-    except Exception as e:
-        logging.error(f"Ошибка генерации аудио: {e}")
-        return None
-
-# ==============================
 # Команда /start
-# ==============================
-@dp.message_handler(commands=["start"])
-async def start_command(message: types.Message):
-    await message.answer("Привет! Я Бультыхвост-сказочник 🐾\nКак зовут ребёнка, для которого сочинять сказки?")
-    user_data[message.from_user.id] = {}
+@dp.message_handler(commands=['start'])
+async def send_welcome(message: types.Message):
+    await message.answer("Привет! 🐬 Я бот Бултыхвост.\nКак зовут ребёнка?")
+    user_name[message.from_user.id] = None
 
-# ==============================
-# Обработка текстов
-# ==============================
+# Сохраняем имя ребёнка
+@dp.message_handler(lambda msg: user_name.get(msg.from_user.id) is None)
+async def save_child_name(message: types.Message):
+    user_name[message.from_user.id] = message.text
+    await message.answer(f"Отлично, {message.text}! 🎉\nТеперь напиши тему сказки.")
+
+# Генерация сказки, иллюстрации и озвучки
 @dp.message_handler()
-async def handle_message(message: types.Message):
-    user_id = message.from_user.id
-
-    # Если имени ребёнка ещё нет → сохраняем
-    if "child_name" not in user_data[user_id]:
-        user_data[user_id]["child_name"] = message.text
-        await message.answer(f"Имя ребёнка — {message.text}? Отлично! Теперь напиши тему сказки ✨")
-        return
-
-    # Если имя уже есть → сохраняем тему
-    if "topic" not in user_data[user_id]:
-        user_data[user_id]["topic"] = message.text
-        await message.answer("Пишу сказку... 📖")
-
-        child_name = user_data[user_id]["child_name"]
-        topic = user_data[user_id]["topic"]
+async def generate_story(message: types.Message):
+    try:
+        child = user_name.get(message.from_user.id, "ребёнок")
+        topic = message.text
 
         # Генерация сказки
-        story = await generate_story(child_name, topic)
-        if not story:
-            await message.answer("Не удалось сочинить сказку 😢 Попробуй ещё раз позже.")
-            return
+        prompt = f"Сочини добрую сказку про персонажа Бултыхвост и ребёнка по имени {child}. Тема: {topic}."
+        response = openai.Completion.create(
+            engine="text-davinci-003",
+            prompt=prompt,
+            max_tokens=600,
+            temperature=0.8
+        )
+        story = response.choices[0].text.strip()
 
         # Отправляем текст сказки
-        await message.answer(f"Вот твоя сказка:\n\n{story}")
+        await message.answer(f"📖 Вот твоя сказка:\n\n{story}")
 
-        # Генерация и отправка аудио
-        audio_path = generate_audio(story)
-        if audio_path:
-            await message.answer_audio(InputFile(audio_path))
-        else:
-            await message.answer("Не удалось создать аудио 😢")
+        # Создаём озвучку
+        tts = gTTS(text=story, lang="ru")
+        audio_bytes = BytesIO()
+        tts.write_to_fp(audio_bytes)
+        audio_bytes.seek(0)
 
-        # Сбрасываем данные
-        user_data.pop(user_id, None)
+        # Отправляем аудио
+        await message.answer_audio(audio=audio_bytes, title="Сказка Бултыхвост")
 
-# ==============================
-# Запуск бота
-# ==============================
+    except Exception as e:
+        logging.error(f"Ошибка: {e}")
+        await message.answer("⚠️ Не удалось сочинить сказку. Попробуй снова.")
+
+# Основная точка входа
 if __name__ == "__main__":
-    logging.info("Бот запущен...")
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(dp.start_polling())
