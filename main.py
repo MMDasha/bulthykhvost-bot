@@ -19,10 +19,12 @@ load_dotenv()
 TELEGRAM_API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-if not TELEGRAM_API_TOKEN:
-    raise ValueError("TELEGRAM_API_TOKEN is not set")
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY is not set")
+# Проверяем наличие токенов
+if not TELEGRAM_API_TOKEN or not OPENAI_API_KEY:
+    raise EnvironmentError(
+        "❌ TELEGRAM_API_TOKEN или OPENAI_API_KEY не установлены. "
+        "Проверь файл .env или Render Environment Variables."
+)
 
 # ==============================
 # Настройка OpenAI
