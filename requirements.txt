@@ -1,8 +1,7 @@
 aiogram==2.25.1
-openai
+openai>=1.30.0
 python-dotenv
-gtts
-pydub
+gTTS
 
 
 
