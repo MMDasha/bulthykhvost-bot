@@ -1,6 +1,8 @@
 aiogram==2.25.1
-openai==1.30.5
+openai==1.51.0
 python-dotenv
+gTTS
+Pillow
 
 
 
