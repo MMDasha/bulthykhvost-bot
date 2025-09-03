@@ -8,8 +8,8 @@ from gtts import gTTS
 logging.basicConfig(level=logging.INFO)
 
 # Получаем переменные окружения
-TELEGRAM_API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+TELEGRAM_API_TOKEN = os.getenv("7254440299:AAGz0kKhM1WedHDxNhYuqSOKDPSJ-p6PrVE")
+OPENAI_API_KEY = os.getenv("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")
 
 if not TELEGRAM_API_TOKEN:
     raise EnvironmentError("TELEGRAM_API_TOKEN не установлен")
