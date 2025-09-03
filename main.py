@@ -1,83 +1,94 @@
+# main.py
 import os
 import logging
+import asyncio
+from typing import Dict
+
 from aiogram import Bot, Dispatcher, executor, types
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from aiogram.utils.exceptions import Throttled
+from dotenv import load_dotenv
+
+# OpenAI (новый клиент)
 from openai import OpenAI
-from gtts import gTTS
 
-# Логирование
-logging.basicConfig(level=logging.INFO)
+# -------------------
+# Конфигурация / токены
+# -------------------
+load_dotenv()
 
-# Получаем переменные окружения
-TELEGRAM_API_TOKEN = os.getenv("")
-OPENAI_API_KEY = os.getenv("s
+TELEGRAM_API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not TELEGRAM_API_TOKEN:
     raise EnvironmentError("TELEGRAM_API_TOKEN не установлен")
 if not OPENAI_API_KEY:
     raise EnvironmentError("OPENAI_API_KEY не установлен")
 
-# Инициализация бота и клиента OpenAI
+# -------------------
+# Логирование
+# -------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+logger = logging.getLogger("bulthykhvost-bot")
+
+# -------------------
+# Telegram
+# -------------------
 bot = Bot(token=TELEGRAM_API_TOKEN, parse_mode=types.ParseMode.HTML)
 dp = Dispatcher(bot)
+dp.middleware.setup(LoggingMiddleware())
 
+# -------------------
+# OpenAI клиент
+# -------------------
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Состояния для сказки
-user_state = {}
+# -------------------
+# Очень простой сторедж состояния пользователей
+# stage: "ask_name" -> "ask_topic" -> "idle"
+# -------------------
+UserState = Dict[int, Dict[str, str]]
+state: UserState = {}
+
+WELCOME = (
+    "Привет! Я Бультыхвост-сказочник 🐾\n"
+    "Как зовут ребёнка?"
+)
+
+ASK_TOPIC = "Имя ребёнка — <b>{name}</b>? Отлично! ✨ Теперь напиши тему сказки."
+
+TYPING = "Пишу сказку... 📖"
+
+FAILED = "⚠️ Не удалось сочинить сказку. Попробуй ещё чуть позже."
 
 
-@dp.message_handler(commands=["start"])
-async def start_command(message: types.Message):
-    await message.answer("Привет! Я Бультыхвост-сказочник 🐾\nКак зовут ребёнка?")
-    user_state[message.from_user.id] = {"step": "child_name"}
+async def throttle_message(message: types.Message, key: str, rate: float = 1.0):
+    """
+    Короткий антиспам, чтобы не спамить генерацией.
+    """
+    try:
+        await dp.throttle(key, rate=rate)
+    except Throttled:
+        await message.answer("Слишком часто. Дай мне секундочку…")
+        raise
 
 
-@dp.message_handler()
-async def handle_message(message: types.Message):
-    state = user_state.get(message.from_user.id, {})
-
-    if state.get("step") == "child_name":
-        child_name = message.text.strip()
-        state["child_name"] = child_name
-        state["step"] = "story_theme"
-        await message.answer(f"Имя ребёнка — {child_name}? Отлично! ✨ Теперь напиши тему сказки.")
-        return
-
-    if state.get("step") == "story_theme":
-        theme = message.text.strip()
-        child_name = state.get("child_name")
-
-        await message.answer("Пишу сказку... 📖")
-
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "Ты детский сказочник. Придумывай короткие сказки (10-15 предложений)."},
-                    {"role": "user", "content": f"Придумай сказку для ребёнка {child_name} на тему: {theme}"}
-                ],
-                max_tokens=400
-            )
-
-            story = response.choices[0].message["content"].strip()
-
-            # Отправляем текст сказки
-            await message.answer(story)
-
-            # Дополнительно — озвучка сказки
-            tts = gTTS(text=story, lang="ru")
-            voice_file = f"story_{message.from_user.id}.mp3"
-            tts.save(voice_file)
-
-            with open(voice_file, "rb") as f:
-                await message.answer_voice(f)
-
-            os.remove(voice_file)
-
-        except Exception as e:
-            logging.error(f"Ошибка при генерации сказки: {e}")
-            await message.answer("⚠️ Не удалось сочинить сказку. Попробуй ещё раз чуть позже.")
+def build_prompt(child_name: str, topic: str) -> str:
+    return (
+        "Ты добрый сказочник. Сочини тёплую, добрую детскую сказку на русском языке.\n"
+        f"Имя ребёнка: {child_name}\n"
+        f"Тема: {topic}\n\n"
+        "Требования:\n"
+        "• 8–12 коротких абзацев (не слишком длинно)\n"
+        "• Яркие, но простые образы\n"
+        "• Дружелюбный тон и тёплая мораль в конце\n"
+        "• Без насилия и пугающих сцен\n"
+    )
 
 
-if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+async def generate_story(child_name: str, topic: str) -> str:
+    """
+    Вызов OpenAI Chat Completions (новый клиент
